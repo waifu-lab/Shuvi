@@ -1,5 +1,12 @@
 [tool.poetry]
 package-mode = false
+packages = [
+    {include = "hai"},
+    {include = "src"},
+]
+
+[tool.poetry.group.dev.dependencies]
+pytest-asyncio = "^1.3.0"
 
 [project]
 name = "shuvi"
@@ -10,14 +17,29 @@ authors = [
 ]
 license = {text = "MIT License"}
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "python-dotenv (>=1.0.1,<1.1.0)",
     "pydantic (>=2.12.5,<3.0.0)",
+    "httpx (>=0.28.1,<0.29.0)",
 ]
 
 
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["test"]
+asyncio_mode = "auto"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+lint.select = ["ASYNC", "ARG", "B", "C", "C4", "E", "F", "Q", "W", "I"]
+
+lint.ignore = ["F401"]
+
+lint.unfixable = ["F401"]
+
+line-length = 120
