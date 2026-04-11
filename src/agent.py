@@ -5,13 +5,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from hai.providers.providers import ProviderText
 from hai.tool import Tool
-from src.types import (
+from shuvi.types import (
     AGENT_OUTCOME,
     AgentCallbacks,
     AgentConfig,
     AgentResult,
     ExecutionTrace,
     LoopConfig,
+    Message,
+    TokenUsage,
     ToolCallTrace,
     VerificationRecord,
     VerifyFn,
@@ -36,9 +38,9 @@ class Agent:
         self._session_id: Optional[str] = config.session_id
         self._tools: List[Tool] = list(config.tools)
         self._tool_map: Dict[str, Tool] = {t.name: t for t in self._tools}
-        self._message_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+        self._message_queue: asyncio.Queue[Message] = asyncio.Queue()
 
-    async def run(self, messages: List[Dict[str, Any]]) -> AgentResult:
+    async def run(self, messages: List[Message]) -> AgentResult:
         """Execute the agent: inner tool loop + optional outer verify loop."""
         start = datetime.now()
         trace = ExecutionTrace(
@@ -62,8 +64,9 @@ class Agent:
 
                 trace.inner_iterations += iterations
                 trace.tool_calls.extend(tool_traces)
-                for k in ("input", "output", "total"):
-                    trace.token_usage[k] = trace.token_usage.get(k, 0) + usage.get(k, 0)
+                trace.token_usage.input += usage.input
+                trace.token_usage.output += usage.output
+                trace.token_usage.total += usage.total
 
                 if hit_max:
                     trace.outcome = AGENT_OUTCOME.max_iterations
@@ -105,7 +108,7 @@ class Agent:
 
         return AgentResult(messages=final_msgs, trace=trace, outcome=trace.outcome)
 
-    def queue_message(self, message: Dict[str, Any]) -> None:
+    def queue_message(self, message: Message) -> None:
         self._message_queue.put_nowait(message)
 
     def add_tool(self, tool: Tool) -> None:
@@ -122,8 +125,8 @@ class Agent:
 
     async def _inner_loop(
         self,
-        messages: List[Dict[str, Any]],
-    ) -> Tuple[List[Dict[str, Any]], int, List[ToolCallTrace], Dict[str, int], bool]:
+        messages: List[Message],
+    ) -> Tuple[List[Message], int, List[ToolCallTrace], TokenUsage, bool]:
         """Tool execution loop for one outer iteration.
 
         Returns (final_messages, iterations, tool_traces, usage, hit_max_iterations).
@@ -131,7 +134,7 @@ class Agent:
         msgs = list(messages)
         iterations = 0
         tool_traces: List[ToolCallTrace] = []
-        total_usage: Dict[str, int] = {"input": 0, "output": 0, "total": 0}
+        total_usage = TokenUsage()
         max_iter = self._loop.max_inner_iterations
 
         while True:
@@ -147,8 +150,9 @@ class Agent:
                 system_prompt=self._system_prompt or None,
             )
 
-            for k in ("input", "output", "total"):
-                total_usage[k] += turn.usage.get(k, 0)
+            total_usage.input += turn.usage.get("input", 0)
+            total_usage.output += turn.usage.get("output", 0)
+            total_usage.total += turn.usage.get("total", 0)
 
             iterations += 1
 
@@ -189,7 +193,7 @@ class Agent:
 
         return msgs, iterations, tool_traces, total_usage, False
 
-    async def _execute_tool_call(self, tool_call: Dict[str, Any]) -> Tuple[str, ToolCallTrace]:
+    async def _execute_tool_call(self, tool_call: Message) -> Tuple[str, ToolCallTrace]:
         name = tool_call["function"]["name"]
         arguments = tool_call["function"]["arguments"]
 
@@ -214,7 +218,7 @@ class Agent:
         return result, ToolCallTrace(name=name, input=arguments, output=result, duration_ms=duration)
 
 
-async def _call_verify(verify_fn: list[VerifyFn], messages: List[Dict[str, Any]]) -> VerificationRecord:
+async def _call_verify(verify_fn: List[VerifyFn], messages: List[Message]) -> VerificationRecord:
     """Call each verify_fn in order; return the first failure, or passed if all pass."""
     last: VerificationRecord = VerificationRecord(passed=True)
     for fn in verify_fn:
