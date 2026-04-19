@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from hai.providers.providers import ProviderText
 from hai.tool import Tool
+
 from shuvi.types import (
     AGENT_OUTCOME,
     AgentCallbacks,

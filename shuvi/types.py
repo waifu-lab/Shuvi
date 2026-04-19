@@ -1,10 +1,9 @@
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from hai.providers.providers import ProviderText
 from hai.tool import Tool
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AGENT_EVENT(str, Enum):
