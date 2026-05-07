@@ -13,9 +13,10 @@ from typing import (
     runtime_checkable,
 )
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from hai.providers.providers import ProviderText
 from hai.tool import Tool
-from pydantic import BaseModel, ConfigDict, Field
 
 
 class ToolCallFunction(BaseModel):
@@ -165,6 +166,7 @@ class AgentCallbacks(BaseModel):
 
     tool_call: Optional[Callable[[str, str], None]] = None
     tool_result: Optional[Callable[[str, str], None]] = None
+    on_tool_error: Optional[Union[Callable[[str, Exception], None], Callable[[str, Exception], Awaitable[None]]]] = None
     assistant_message: Optional[Callable[[AppMessage], None]] = None
     on_chunk: Optional[Union[Callable[[str], None], Callable[[str], Awaitable[None]]]] = (
         None  # called per streaming token

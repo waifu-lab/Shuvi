@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 from hai.providers.providers import ProviderText
 from hai.tool import Tool
-
 from shuvi.types import (
     AGENT_OUTCOME,
     AgentCallbacks,
@@ -247,7 +246,15 @@ class Agent:
             duration = (datetime.now() - t_start).total_seconds() * 1000
             return error, ToolCallTrace(name=name, input=arguments, output=error, duration_ms=duration, error=error)
 
-        result = await tool.call(arguments)
+        try:
+            result = await tool.call(arguments)
+        except Exception as e:
+            duration = (datetime.now() - t_start).total_seconds() * 1000
+            error_msg = f"Error executing tool '{name}': {e}"
+            await _emit(self._callbacks.on_tool_error, name, e)
+            return error_msg, ToolCallTrace(
+                name=name, input=arguments, output=error_msg, duration_ms=duration, error=error_msg
+            )
         duration = (datetime.now() - t_start).total_seconds() * 1000
         return result, ToolCallTrace(name=name, input=arguments, output=result, duration_ms=duration)
 
