@@ -1,9 +1,70 @@
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Protocol,
+    Sequence,
+    Union,
+    runtime_checkable,
+)
 
 from hai.providers.providers import ProviderText
 from hai.tool import Tool
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class ToolCallFunction(BaseModel):
+    name: str
+    arguments: str
+
+
+class ToolCall(BaseModel):
+    id: str
+    type: Literal["function"] = "function"
+    function: ToolCallFunction
+
+
+@runtime_checkable
+class AppMessage(Protocol):
+    @property
+    def role(self) -> str: ...
+    @property
+    def content(self) -> Any: ...
+
+    def model_dump(self, *, exclude_none: bool = False) -> Dict[str, Any]: ...
+
+
+class UserMessage(BaseModel):
+    role: Literal["user"] = "user"
+    content: List[Dict[str, Any]]
+
+    def model_dump(self, *, exclude_none: bool = False) -> Dict[str, Any]:
+        return {"role": self.role, "content": self.content}
+
+
+class AssistantMessage(BaseModel):
+    role: Literal["assistant"] = "assistant"
+    content: Optional[str] = None
+    tool_calls: Optional[List[ToolCall]] = None
+
+
+class ToolMessage(BaseModel):
+    role: Literal["tool"] = "tool"
+    content: str
+    tool_call_id: str
+
+
+class SystemMessage(BaseModel):
+    role: Literal["system"] = "system"
+    content: str
+
+
+LLMMessage = Union[UserMessage, AssistantMessage, ToolMessage]
 
 
 class AGENT_EVENT(str, Enum):
@@ -56,16 +117,39 @@ class ExecutionTrace(BaseModel):
     session_id: Optional[str] = None
 
 
-Message = Dict[str, Any]
-
-
 class AgentResult(BaseModel):
-    messages: List[Message]
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    messages: List[AppMessage]
     trace: ExecutionTrace
     outcome: AGENT_OUTCOME
+    handoff: Optional[str] = None
 
 
-VerifyFn = Callable[[List[Message]], Union[VerificationRecord, bool]]
+class HandoffSignal(Exception):
+    """Raised inside Agent to signal control transfer to another agent."""
+
+    def __init__(self, target: str, context: Optional[str] = None) -> None:
+        self.target = target
+        self.context = context  # optional summary passed to the next agent
+
+
+VerifyResult = Union[VerificationRecord, bool]
+VerifyFn = Union[
+    Callable[[Sequence[AppMessage]], VerifyResult],
+    Callable[[Sequence[AppMessage]], "Awaitable[VerifyResult]"],
+]
+
+
+class LoopState(BaseModel):
+    """Mutable state carried across iterations of the agent loop."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    turn_count: int = 0
+    pending_summary: Optional[str] = None  # accumulated summary for context compaction
+    stop_active: bool = False  # a stop hook / signal has fired
+    transition: Optional[str] = None  # handoff target agent name
 
 
 class LoopConfig(BaseModel):
@@ -81,9 +165,13 @@ class AgentCallbacks(BaseModel):
 
     tool_call: Optional[Callable[[str, str], None]] = None
     tool_result: Optional[Callable[[str, str], None]] = None
-    assistant_message: Optional[Callable[[Message], None]] = None
+    assistant_message: Optional[Callable[[AppMessage], None]] = None
+    on_chunk: Optional[Union[Callable[[str], None], Callable[[str], Awaitable[None]]]] = (
+        None  # called per streaming token
+    )
     iteration_end: Optional[Callable[[int, List[ToolCallTrace]], None]] = None
     error: Optional[Callable[[Exception], None]] = None
+    state_update: Optional[Callable[["LoopState"], None]] = None  # fired after each state mutation
 
 
 class AgentConfig(BaseModel):
@@ -95,3 +183,4 @@ class AgentConfig(BaseModel):
     loop: LoopConfig = LoopConfig()
     callbacks: AgentCallbacks = AgentCallbacks()
     session_id: Optional[str] = None
+    context_manager: Optional[Any] = None  # shuvi.context.ContextManager; Any avoids circular import

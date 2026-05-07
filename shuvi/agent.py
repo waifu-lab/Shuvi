@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 from hai.providers.providers import ProviderText
 from hai.tool import Tool
@@ -11,16 +11,29 @@ from shuvi.types import (
     AgentCallbacks,
     AgentConfig,
     AgentResult,
+    AppMessage,
+    AssistantMessage,
     ExecutionTrace,
+    HandoffSignal,
     LoopConfig,
-    Message,
+    LoopState,
     TokenUsage,
+    ToolCall,
+    ToolCallFunction,
     ToolCallTrace,
+    ToolMessage,
+    UserMessage,
     VerificationRecord,
     VerifyFn,
 )
 
+if TYPE_CHECKING:
+    from shuvi.context import ContextManager
 
+
+# C:\Users\whitecloud\Documents\code\waifu\shuvi\agent.py:39: RuntimeWarning: coroutine 'HTTPAdapter.handle.<locals>.reply_fn' was never awaited
+#  fn(*args)
+# RuntimeWarning: Enable tracemalloc to get the object allocation traceback
 async def _emit(fn: Optional[Any], *args: Any) -> None:
     if fn is None:
         return
@@ -30,8 +43,12 @@ async def _emit(fn: Optional[Any], *args: Any) -> None:
         fn(*args)
 
 
+def _to_llm(messages: Sequence[AppMessage]) -> List[Dict[str, Any]]:
+    return [m.model_dump(exclude_none=True) for m in messages]
+
+
 class Agent:
-    def __init__(self, config: AgentConfig):
+    def __init__(self, config: AgentConfig) -> None:
         self._provider: ProviderText = config.provider
         self._system_prompt: str = config.system_prompt
         self._loop: LoopConfig = config.loop
@@ -39,29 +56,51 @@ class Agent:
         self._session_id: Optional[str] = config.session_id
         self._tools: List[Tool] = list(config.tools)
         self._tool_map: Dict[str, Tool] = {t.name: t for t in self._tools}
-        self._message_queue: asyncio.Queue[Message] = asyncio.Queue()
+        self._message_queue: asyncio.Queue[AppMessage] = asyncio.Queue()
+        self._context_manager: Optional["ContextManager"] = config.context_manager
+        self._state = LoopState()
 
-    async def run(self, messages: List[Message]) -> AgentResult:
-        """Execute the agent: inner tool loop + optional outer verify loop."""
+    @property
+    def state(self) -> LoopState:
+        return self._state
+
+    def reset_state(self) -> None:
+        self._state = LoopState()
+
+    async def run(self, messages: Optional[Sequence[AppMessage]] = None) -> AgentResult:
+        """
+        If ContextManager is present, messages param is ignored — append to
+        context_manager before calling run(). Otherwise messages must be provided.
+        """
+        if self._context_manager is not None:
+            initial_messages = await self._context_manager.prepare()
+        else:
+            if messages is None:
+                raise ValueError("messages required when no ContextManager is configured")
+            initial_messages = list(messages)
+
         start = datetime.now()
         trace = ExecutionTrace(
             start_time=start.isoformat(),
             session_id=self._session_id,
         )
 
-        current_messages = list(messages)
+        current_messages = initial_messages
         verify_fn = self._loop.verify_completion
         max_outer = self._loop.max_outer_retries
+        handoff_target: Optional[str] = None
 
         try:
             while True:
-                (
-                    final_msgs,
-                    iterations,
-                    tool_traces,
-                    usage,
-                    hit_max,
-                ) = await self._inner_loop(current_messages)
+                try:
+                    final_msgs, iterations, tool_traces, usage, hit_max = await self._inner_loop(current_messages)
+                except HandoffSignal as hs:
+                    handoff_target = hs.target
+                    self._state.transition = hs.target
+                    await _emit(self._callbacks.state_update, self._state)
+                    trace.outcome = AGENT_OUTCOME.completed
+                    final_msgs = current_messages
+                    break
 
                 trace.inner_iterations += iterations
                 trace.tool_calls.extend(tool_traces)
@@ -89,11 +128,9 @@ class Agent:
                     break
 
                 trace.outer_retries += 1
+
                 current_messages = final_msgs + [
-                    {
-                        "role": "user",
-                        "content": f"驗證未通過：{verification.reason}，請修正",
-                    }
+                    UserMessage(content=[{"type": "text", "text": f"驗證未通過：{verification.reason}，請修正"}])
                 ]
 
         except Exception as e:
@@ -107,9 +144,13 @@ class Agent:
         trace.end_time = end.isoformat()
         trace.duration_ms = (end - start).total_seconds() * 1000
 
-        return AgentResult(messages=final_msgs, trace=trace, outcome=trace.outcome)
+        if self._context_manager is not None:
+            new_msgs = final_msgs[len(initial_messages) :]
+            self._context_manager.extend(new_msgs)
 
-    def queue_message(self, message: Message) -> None:
+        return AgentResult(messages=final_msgs, trace=trace, outcome=trace.outcome, handoff=handoff_target)
+
+    def queue_message(self, message: AppMessage) -> None:
         self._message_queue.put_nowait(message)
 
     def add_tool(self, tool: Tool) -> None:
@@ -126,13 +167,9 @@ class Agent:
 
     async def _inner_loop(
         self,
-        messages: List[Message],
-    ) -> Tuple[List[Message], int, List[ToolCallTrace], TokenUsage, bool]:
-        """Tool execution loop for one outer iteration.
-
-        Returns (final_messages, iterations, tool_traces, usage, hit_max_iterations).
-        """
-        msgs = list(messages)
+        messages: Sequence[AppMessage],
+    ) -> Tuple[List[AppMessage], int, List[ToolCallTrace], TokenUsage, bool]:
+        msgs: List[AppMessage] = list(messages)
         iterations = 0
         tool_traces: List[ToolCallTrace] = []
         total_usage = TokenUsage()
@@ -142,61 +179,63 @@ class Agent:
             while not self._message_queue.empty():
                 msgs.append(self._message_queue.get_nowait())
 
+            if self._state.stop_active:
+                return msgs, iterations, tool_traces, total_usage, False
+
             if max_iter is not None and iterations >= max_iter:
                 return msgs, iterations, tool_traces, total_usage, True
 
             turn = await self._provider.call_once(
-                messages=msgs,
+                messages=_to_llm(msgs),
                 tools=self._tools or None,
                 system_prompt=self._system_prompt or None,
+                on_chunk=self._callbacks.on_chunk,
             )
 
             total_usage.input += turn.usage.get("input", 0)
             total_usage.output += turn.usage.get("output", 0)
             total_usage.total += turn.usage.get("total", 0)
 
+            self._state.turn_count += 1
             iterations += 1
+            await _emit(self._callbacks.state_update, self._state)
 
             if turn.content:
                 await _emit(
                     self._callbacks.assistant_message,
-                    {"role": "assistant", "content": turn.content},
+                    AssistantMessage(content=turn.content),
                 )
 
+            tool_calls: Optional[List[ToolCall]] = None
             if turn.tool_calls:
-                msgs.append(
-                    {
-                        "role": "assistant",
-                        "content": turn.content or None,
-                        "tool_calls": turn.tool_calls,
-                    }
-                )
+                tool_calls = [
+                    ToolCall(
+                        id=tc["id"],
+                        function=ToolCallFunction(name=tc["function"]["name"], arguments=tc["function"]["arguments"]),
+                    )
+                    for tc in turn.tool_calls
+                ]
+                msgs.append(AssistantMessage(content=turn.content, tool_calls=tool_calls))
             else:
-                msgs.append({"role": "assistant", "content": turn.content})
+                msgs.append(AssistantMessage(content=turn.content))
 
-            if not turn.tool_calls:
+            if not tool_calls:
                 break
 
-            results = await asyncio.gather(*[self._execute_tool_call(tc) for tc in turn.tool_calls])
+            results = await asyncio.gather(*[self._execute_tool_call(tc) for tc in tool_calls])
 
-            for tc, (result, trace) in zip(turn.tool_calls, results, strict=False):
+            for tc, (result, trace) in zip(tool_calls, results, strict=False):
                 tool_traces.append(trace)
-                msgs.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": result,
-                    }
-                )
-                await _emit(self._callbacks.tool_result, tc["function"]["name"], result)
+                msgs.append(ToolMessage(tool_call_id=tc.id, content=result))
+                await _emit(self._callbacks.tool_result, tc.function.name, result)
 
             await _emit(self._callbacks.iteration_end, iterations, tool_traces)
 
         return msgs, iterations, tool_traces, total_usage, False
 
-    async def _execute_tool_call(self, tool_call: Message) -> Tuple[str, ToolCallTrace]:
-        name = tool_call["function"]["name"]
-        arguments = tool_call["function"]["arguments"]
+    async def _execute_tool_call(self, tool_call: ToolCall) -> Tuple[str, ToolCallTrace]:
+        name = tool_call.function.name
+        arguments = tool_call.function.arguments
 
         await _emit(self._callbacks.tool_call, name, arguments)
 
@@ -206,21 +245,14 @@ class Agent:
         if tool is None:
             error = f"Tool '{name}' not found"
             duration = (datetime.now() - t_start).total_seconds() * 1000
-            return error, ToolCallTrace(
-                name=name,
-                input=arguments,
-                output=error,
-                duration_ms=duration,
-                error=error,
-            )
+            return error, ToolCallTrace(name=name, input=arguments, output=error, duration_ms=duration, error=error)
 
         result = await tool.call(arguments)
         duration = (datetime.now() - t_start).total_seconds() * 1000
         return result, ToolCallTrace(name=name, input=arguments, output=result, duration_ms=duration)
 
 
-async def _call_verify(verify_fn: List[VerifyFn], messages: List[Message]) -> VerificationRecord:
-    """Call each verify_fn in order; return the first failure, or passed if all pass."""
+async def _call_verify(verify_fn: List[VerifyFn], messages: Sequence[AppMessage]) -> VerificationRecord:
     last: VerificationRecord = VerificationRecord(passed=True)
     for fn in verify_fn:
         if inspect.iscoroutinefunction(fn):
