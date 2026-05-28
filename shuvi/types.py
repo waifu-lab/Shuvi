@@ -164,13 +164,11 @@ class LoopConfig(BaseModel):
 class AgentCallbacks(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    tool_call: Optional[Callable[[str, str], None]] = None
-    tool_result: Optional[Callable[[str, str], None]] = None
+    tool_call: Optional[Union[Callable[[str, str], None], Callable[[str, str], Awaitable[None]]]] = None
+    tool_result: Optional[Union[Callable[[str, str], None], Callable[[str, str], Awaitable[None]]]] = None
     on_tool_error: Optional[Union[Callable[[str, Exception], None], Callable[[str, Exception], Awaitable[None]]]] = None
     assistant_message: Optional[Callable[[AppMessage], None]] = None
-    on_chunk: Optional[Union[Callable[[str], None], Callable[[str], Awaitable[None]]]] = (
-        None  # called per streaming token
-    )
+    on_chunk: Optional[Union[Callable[[str], None], Callable[[str], Awaitable[None]]]] = None  # called per streaming token
     iteration_end: Optional[Callable[[int, List[ToolCallTrace]], None]] = None
     error: Optional[Callable[[Exception], None]] = None
     state_update: Optional[Callable[["LoopState"], None]] = None  # fired after each state mutation
