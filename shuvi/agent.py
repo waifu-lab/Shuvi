@@ -1,10 +1,12 @@
 import asyncio
+import base64
 import inspect
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from hai.providers.providers import ProviderText
-from hai.tool import Tool
+from hai.tool import ImageResult, Tool
+
 from shuvi.types import (
     AGENT_OUTCOME,
     AgentCallbacks,
@@ -30,16 +32,15 @@ if TYPE_CHECKING:
     from shuvi.context import ContextManager
 
 
-# C:\Users\whitecloud\Documents\code\waifu\shuvi\agent.py:39: RuntimeWarning: coroutine 'HTTPAdapter.handle.<locals>.reply_fn' was never awaited
-#  fn(*args)
-# RuntimeWarning: Enable tracemalloc to get the object allocation traceback
 async def _emit(fn: Optional[Any], *args: Any) -> None:
     if fn is None:
         return
     if inspect.iscoroutinefunction(fn):
         await fn(*args)
     else:
-        fn(*args)
+        result = fn(*args)
+        if asyncio.iscoroutine(result):
+            await result
 
 
 def _to_llm(messages: Sequence[AppMessage]) -> List[Dict[str, Any]]:
@@ -225,14 +226,32 @@ class Agent:
 
             for tc, (result, trace) in zip(tool_calls, results, strict=False):
                 tool_traces.append(trace)
-                msgs.append(ToolMessage(tool_call_id=tc.id, content=result))
-                await _emit(self._callbacks.tool_result, tc.function.name, result)
+                # Sent tool result as User message content
+                if isinstance(result, ImageResult):
+                    msgs.append(ToolMessage(tool_call_id=tc.id, content="[image result]"))
+                    msgs.append(
+                        UserMessage(
+                            content=[
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{result.media_type};base64,{base64.b64encode(result.data).decode()}"
+                                    },
+                                }
+                            ]
+                        )
+                    )
+                    result_str = result.description or f"[image {len(result.data)} bytes]"
+                    await _emit(self._callbacks.tool_result, tc.function.name, result_str)
+                else:
+                    msgs.append(ToolMessage(tool_call_id=tc.id, content=result))
+                    await _emit(self._callbacks.tool_result, tc.function.name, result)
 
             await _emit(self._callbacks.iteration_end, iterations, tool_traces)
 
         return msgs, iterations, tool_traces, total_usage, False
 
-    async def _execute_tool_call(self, tool_call: ToolCall) -> Tuple[str, ToolCallTrace]:
+    async def _execute_tool_call(self, tool_call: ToolCall) -> Tuple[Union[str, ImageResult], ToolCallTrace]:
         name = tool_call.function.name
         arguments = tool_call.function.arguments
 
@@ -256,7 +275,11 @@ class Agent:
                 name=name, input=arguments, output=error_msg, duration_ms=duration, error=error_msg
             )
         duration = (datetime.now() - t_start).total_seconds() * 1000
-        return result, ToolCallTrace(name=name, input=arguments, output=result, duration_ms=duration)
+        if isinstance(result, ImageResult):
+            trace_output = result.description or f"[image {len(result.data)} bytes]"
+        else:
+            trace_output = result
+        return result, ToolCallTrace(name=name, input=arguments, output=trace_output, duration_ms=duration)
 
 
 async def _call_verify(verify_fn: List[VerifyFn], messages: Sequence[AppMessage]) -> VerificationRecord:

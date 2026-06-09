@@ -7,13 +7,17 @@ python-dotenv = ">=1.0.1,<1.1.0"
 
 [project]
 name = "shuvi"
-version = "0.1.0"
-description = ""
+version = "0.1.2"
+description = "A lightweight async agent loop for building AI companions with Python."
 authors = [{ name = "phillychi3", email = "phillychi3@gmail.com" }]
 license = { text = "MIT License" }
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["pydantic (>=2.12.5,<3.0.0)", "hydrogen-ai (>=0.1.0,<0.2.0)"]
+dependencies = ["pydantic (>=2.12.5,<3.0.0)", "hydrogen-ai (>=0.1.2,<0.2.0)"]
+
+[project.urls]
+Homepage = "https://github.com/waifu-lab/Shuvi"
+Repository = "https://github.com/waifu-lab/Shuvi"
 
 
 [tool.pytest.ini_options]
