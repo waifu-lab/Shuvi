@@ -24,4 +24,4 @@ MANIFEST
 .DS_Store
 .env
 .pytest_cache
-/docs
+/ldocs
