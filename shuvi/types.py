@@ -127,12 +127,18 @@ class AgentResult(BaseModel):
     handoff: Optional[str] = None
 
 
-class HandoffSignal(Exception):
-    """Raised inside Agent to signal control transfer to another agent."""
+class HandoffSignal(BaseException):
+    """Raised from a tool to transfer control to another agent.
+
+    A BaseException (like asyncio.CancelledError) so ``except Exception`` in tools
+    or in hai's Tool.call does not swallow it.
+    """
 
     def __init__(self, target: str, context: Optional[str] = None) -> None:
+        super().__init__(target)
         self.target = target
         self.context = context  # optional summary passed to the next agent
+        self.messages: Optional[List[AppMessage]] = None  # set by Agent: history up to the handoff
 
 
 VerifyResult = Union[VerificationRecord, bool]
@@ -158,7 +164,22 @@ class LoopConfig(BaseModel):
 
     max_inner_iterations: Optional[int] = None  # None = unlimited
     max_outer_retries: int = 3
+    # re-run one LLM turn when its stream breaks mid-way (hai already retries before the first chunk)
+    max_turn_retries: int = 1
+    # re-run a turn that returned neither text nor tool calls (not for finish_reason="content_filter")
+    max_empty_retries: int = 1
+    # finish_reason="length": ask the model to continue; the parts are merged into one AssistantMessage
+    max_length_continuations: int = 2
+    length_continuation_prompt: str = (
+        "Your previous reply was cut off by the output token limit. "
+        "Continue exactly where it stopped, without repeating or summarizing what you already wrote."
+    )
+    truncated_tool_call_prompt: str = (
+        "Your previous tool call was cut off by the output token limit, so it was not executed. "
+        "Call the tool again with shorter arguments, or split the work into smaller calls."
+    )
     verify_completion: Optional[List[VerifyFn]] = None  # fn(messages) -> VerificationRecord | bool
+    verify_retry_prompt: str = "Verification failed. Please try again. Reason: {reason}"
 
 
 class AgentCallbacks(BaseModel):
@@ -168,7 +189,11 @@ class AgentCallbacks(BaseModel):
     tool_result: Optional[Union[Callable[[str, str], None], Callable[[str, str], Awaitable[None]]]] = None
     on_tool_error: Optional[Union[Callable[[str, Exception], None], Callable[[str, Exception], Awaitable[None]]]] = None
     assistant_message: Optional[Callable[[AppMessage], None]] = None
-    on_chunk: Optional[Union[Callable[[str], None], Callable[[str], Awaitable[None]]]] = None  # called per streaming token
+    on_chunk: Optional[Union[Callable[[str], None], Callable[[str], Awaitable[None]]]] = (
+        None  # called per streaming token
+    )
+    # streamed text of a broken turn that is being discarded before the turn is re-run
+    on_stream_reset: Optional[Union[Callable[[str], None], Callable[[str], Awaitable[None]]]] = None
     iteration_end: Optional[Callable[[int, List[ToolCallTrace]], None]] = None
     error: Optional[Callable[[Exception], None]] = None
     state_update: Optional[Callable[["LoopState"], None]] = None  # fired after each state mutation
