@@ -1,0 +1,69 @@
+---
+title: 迴圈控制
+description: LoopConfig 的每一個欄位。
+---
+
+```python
+from shuvi.types import LoopConfig
+
+loop = LoopConfig(
+    max_inner_iterations=10,
+    max_outer_retries=3,
+    max_turn_retries=1,
+    max_empty_retries=1,
+    max_length_continuations=2,
+)
+```
+
+## 圈數上限
+
+| 欄位                   | 預設   | 意思                                                       |
+| ---------------------- | ------ | ---------------------------------------------------------- |
+| `max_inner_iterations` | `None` | 一次 loop 最多呼叫模型幾次。`None` 是不限                 |
+| `max_outer_retries`    | `3`    | 驗證沒過時最多重跑幾次，見[完成度驗證](/docs/verification) |
+
+到達 `max_inner_iterations` 時，`outcome` 是 `max_iterations`，最後一則訊息可能是 `ToolMessage`（模型還沒看到工具結果）。
+
+`max_inner_iterations` 是**每次 loop** 各自計算：驗證失敗重跑時會重新計數。
+
+## 單次呼叫的重試
+
+hai 的 provider 本身會重試網路錯誤、429 和 5xx。Shuvi 另外處理兩種情況：
+
+| 欄位                | 預設 | 什麼時候重試                                                              |
+| ------------------- | ---- | ------------------------------------------------------------------------- |
+| `max_turn_retries`  | `1`  | 串流已經吐出一部分文字後才斷線（`StreamInterruptedError`）                |
+| `max_empty_retries` | `1`  | 模型什麼都沒回：沒有文字也沒有工具呼叫（`content_filter` 不算，不重試） |
+
+串流中斷重試前會先呼叫 `on_stream_reset(已經輸出的文字)`，讓你把畫面上那段半截的字收回來。重試次數用完就把例外往外拋。
+
+重試失敗的那幾次也會計入 token 用量。
+
+## 回答被截斷
+
+模型因為輸出 token 上限停下（`finish_reason="length"`）時：
+
+- **一般文字**：自動送出 `length_continuation_prompt` 請它接著寫，最後合併成**一則** `AssistantMessage`。
+- **工具呼叫**：被截斷的工具參數不完整，不會執行；改送 `truncated_tool_call_prompt` 請它用比較短的參數重新呼叫。
+
+最多接 `max_length_continuations`（預設 `2`）次，接著寫的那些提示訊息不會留在最後的對話紀錄裡。
+
+```python
+LoopConfig(
+    length_continuation_prompt="你的回答被截斷了，請從斷掉的地方繼續。",
+    truncated_tool_call_prompt="工具呼叫被截斷了，請用較短的參數重新呼叫。",
+)
+```
+
+<Callout>
+  `assistant_message` callback 每次模型回話都會觸發一次，所以被截斷再接續時，你會收到好幾段，而不是合併後的那一則。
+</Callout>
+
+## 驗證相關
+
+| 欄位                  | 預設                                                    |
+| --------------------- | ------------------------------------------------------- |
+| `verify_completion`   | `None`                                                  |
+| `verify_retry_prompt` | `"Verification failed. Please try again. Reason: {reason}"` |
+
+見[完成度驗證](/docs/verification)。

@@ -1,0 +1,75 @@
+---
+title: 完成度驗證
+description: 答案不及格，就讓模型再想一次。
+---
+
+模型停止呼叫工具，不代表任務真的完成。`verify_completion` 讓你在 loop 結束後檢查一次。
+
+## 寫一個驗證函式
+
+函式收到完整的對話（`Sequence[AppMessage]`），回傳下面任一種：
+
+| 回傳                                        | 意思                       |
+| ------------------------------------------- | -------------------------- |
+| `VerificationRecord(passed=..., reason=...)` | 建議用這個，可以附上理由   |
+| `dict`，例如 `{"passed": False, "reason": "..."}` | 會轉成 `VerificationRecord` |
+| `bool`                                      | 只有過或不過，沒有理由     |
+
+```python
+from shuvi.types import LoopConfig, VerificationRecord
+
+
+def ends_with_conclusion(messages) -> VerificationRecord:
+    text = messages[-1].content or ""
+    if "結論：" in text:
+        return VerificationRecord(passed=True)
+    return VerificationRecord(passed=False, reason="最後要有一行以「結論：」開頭")
+
+
+loop = LoopConfig(verify_completion=[ends_with_conclusion])
+```
+
+## 流程
+
+1. loop 正常結束（不是因為 `max_inner_iterations`）。
+2. 依序跑 `verify_completion` 裡的函式，遇到第一個沒過的就停。
+3. 全部通過：`outcome` 是 `completed`。
+4. 沒過：用 `verify_retry_prompt.format(reason=...)` 建一則 `UserMessage` 接在對話後面，再跑一次 loop。
+5. 重跑了 `max_outer_retries` 次還是沒過：`outcome` 是 `verify_failed`。
+
+每次驗證的結果都會記在 `result.trace.verifications`，重跑次數在 `result.trace.outer_retries`。
+
+```python
+loop = LoopConfig(
+    verify_completion=[ends_with_conclusion],
+    max_outer_retries=2,
+    verify_retry_prompt="還不行。原因：{reason}。請修正後重新回答。",
+)
+```
+
+<Callout type="warn">
+  `bool` 沒有理由，提示訊息會變成 `Reason: None`，模型很難知道哪裡要改。盡量回傳有 `reason` 的 `VerificationRecord`。
+</Callout>
+
+## 用模型來驗證
+
+驗證函式可以是 `async def`，所以也能請另一個模型當評審：
+
+```python
+import json
+
+judge = create_text_provider("openai", model="gpt-4o-mini")
+
+
+async def judged_by_llm(messages) -> VerificationRecord:
+    answer = messages[-1].content or ""
+    turn = await judge.call_once(
+        [{"role": "user", "content": f"這個回答有沒有直接回應問題？只回 JSON："
+          f'{{"passed": true/false, "reason": "..."}}\n\n{answer}'}],
+    )
+    return VerificationRecord(**json.loads(turn.content))
+```
+
+<Callout>
+  Agent 用 `inspect.iscoroutinefunction` 判斷要不要 `await`。請直接傳 `async def` 函式，包在 `lambda` 或 `functools.partial` 裡的 async 函式不會被 await，回傳的 coroutine 會被當成 `True`。
+</Callout>

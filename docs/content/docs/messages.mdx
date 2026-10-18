@@ -1,0 +1,63 @@
+---
+title: 訊息
+description: UserMessage、AssistantMessage、ToolMessage，以及自訂訊息。
+---
+
+所有訊息都在 `shuvi.types`，是 pydantic model，送給模型前會用 `model_dump(exclude_none=True)` 轉成 OpenAI 格式的 dict。
+
+## UserMessage
+
+```python
+UserMessage(content=[
+    {"type": "text", "text": "這是什麼？"},
+    {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+])
+```
+
+`content` 一定是 list，可以混文字和圖片。圖片要模型支援才看得懂。
+
+## AssistantMessage
+
+```python
+AssistantMessage(content="了解。", tool_calls=None)
+```
+
+模型的回答。要求呼叫工具時 `tool_calls` 是 `ToolCall` 的 list，`content` 可能是空字串。
+
+## ToolMessage
+
+```python
+ToolMessage(tool_call_id="call_abc", content="解析完成")
+```
+
+工具結果，由 Agent 自動產生，一般不需要自己建。
+
+## SystemMessage
+
+```python
+SystemMessage(content="...")
+```
+
+一般用 `AgentConfig.system_prompt` 就好。用了 [ContextManager](/docs/context) 時，預設的轉換會把 `system` 角色濾掉。
+
+## 自訂訊息
+
+`run()` 收的是 `AppMessage`：任何有 `role`、`content` 和 `model_dump(exclude_none=...)` 的物件都可以。搭配 ContextManager，就能在對話紀錄裡存一些**不給模型看**的東西：
+
+```python
+from pydantic import BaseModel
+
+
+class Memo(BaseModel):
+    role: str = "memo"     # 不是 user / assistant / tool
+    content: str
+
+
+cm.append(Memo(content="使用者今天心情不好"))
+```
+
+ContextManager 預設只把 `user`、`assistant`、`tool` 送給模型，`Memo` 會留在 `cm.history`，但模型看不到。想把它變成模型看得到的東西，自己寫 `convert_to_llm`，見 [Context 管理](/docs/context#自訂轉換)。
+
+<Callout type="warn">
+  沒有 ContextManager 時，Agent 會把所有訊息原樣送出。這時別放自訂角色，模型 API 會拒絕不認得的 `role`。
+</Callout>

@@ -1,0 +1,75 @@
+---
+title: Context 管理
+description: 讓 ContextManager 幫你記住對話。
+---
+
+不想每次自己傳 `messages`、自己接 `result.messages`，就給 Agent 一個 `ContextManager`。
+
+```python
+from shuvi.context import ContextManager
+
+cm = ContextManager()
+agent = Agent(AgentConfig(provider=llm, context_manager=cm))
+
+cm.append(UserMessage(content=[{"type": "text", "text": "我叫空"}]))
+await agent.run()
+
+cm.append(UserMessage(content=[{"type": "text", "text": "我叫什麼？"}]))
+result = await agent.run()
+print(result.messages[-1].content)   # 你叫空
+```
+
+有 ContextManager 時，`run()` 的 `messages` 參數會被**忽略**。使用者的訊息要先 `append` 進去再呼叫 `run()`。跑完之後，這次新增的訊息（模型回答、工具結果、驗證的重試提示）會自動加回 `cm.history`。
+
+## 方法
+
+| 方法 / 屬性         | 用途                                 |
+| ------------------- | ------------------------------------ |
+| `history`           | 完整的對話紀錄（list，會直接修改）   |
+| `append(message)`   | 加一則                               |
+| `extend(messages)`  | 加多則                               |
+| `clear()`           | 清空                                 |
+| `await prepare()`   | 算出這次要送給模型的訊息             |
+
+## 送給模型前的兩個步驟
+
+`prepare()` 做兩件事：
+
+1. `transform_context(messages)`：裁切、插入、滑動視窗。預設不做事。
+2. `convert_to_llm(messages)`：轉成模型看得懂的訊息。預設只留下 `user`、`assistant`、`tool` 三種角色。
+
+兩個都必須是 `async def`，只影響這次送出的內容，`history` 本身不會變。
+
+### 只送最近的訊息
+
+```python
+async def last_20(messages):
+    recent = messages[-20:]
+    # 不要從 ToolMessage 開頭，它前面那則 assistant 的 tool_calls 被切掉了
+    while recent and recent[0].role == "tool":
+        recent = recent[1:]
+    return recent
+
+cm = ContextManager(transform_context=last_20)
+```
+
+### 自訂轉換
+
+把自訂的 `Memo` 訊息（見[訊息](/docs/messages#自訂訊息)）變成模型看得到的文字：
+
+```python
+async def convert(messages):
+    out = []
+    for m in messages:
+        if m.role == "memo":
+            out.append(UserMessage(content=[{"type": "text", "text": f"（備忘：{m.content}）"}]))
+        elif m.role in ("user", "assistant", "tool"):
+            out.append(m)
+    return out
+
+cm = ContextManager(convert_to_llm=convert)
+```
+
+<Callout type="warn">
+  `transform_context` 和 `convert_to_llm` 會改變送進 loop 的訊息數量，但 Agent 是用「回傳的訊息比送進去的多出幾則」來決定要寫回什麼，所以新增的訊息還是會正確地加到 `history` 尾端。
+</Callout>

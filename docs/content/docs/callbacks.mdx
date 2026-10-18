@@ -1,0 +1,53 @@
+---
+title: Callbacks
+description: 看得到修比在想什麼。
+---
+
+```python
+from shuvi.types import AgentCallbacks
+
+callbacks = AgentCallbacks(
+    on_chunk=lambda text: print(text, end="", flush=True),
+    tool_call=lambda name, args: print(f"\n[呼叫] {name}({args})"),
+    tool_result=lambda name, result: print(f"[結果] {name} → {result}"),
+)
+agent = Agent(AgentConfig(provider=llm, callbacks=callbacks))
+```
+
+每個 callback 都可以是一般函式或 `async def`，沒設的就不呼叫。
+
+## 一覽
+
+| Callback          | 參數                              | 什麼時候                                         |
+| ----------------- | --------------------------------- | ------------------------------------------------ |
+| `on_chunk`        | `text: str`                       | 串流時每收到一段文字（provider 要 `stream=True`） |
+| `on_stream_reset` | `partial: str`                    | 串流中斷，丟掉已輸出的文字準備重來               |
+| `assistant_message` | `message: AssistantMessage`     | 模型回了非空的文字                               |
+| `tool_call`       | `name: str, arguments: str`       | 開始執行工具，`arguments` 是 JSON 字串           |
+| `tool_result`     | `name: str, result: str`          | 工具執行完（含錯誤字串）                         |
+| `on_tool_error`   | `name: str, error: Exception`     | 工具拋出例外                                     |
+| `iteration_end`   | `iteration: int, traces: list`    | 一圈的工具全部跑完                               |
+| `state_update`    | `state: LoopState`                | 每呼叫一次模型、或發生交棒時                     |
+| `error`           | `error: Exception`                | loop 拋出例外；設了它，`run()` 就不會往外拋     |
+
+## 串流與重試
+
+串流斷線時，`on_chunk` 已經印出一部分字了。Agent 重跑這一輪之前會呼叫 `on_stream_reset`，把那段文字交給你：
+
+```python
+shown = []
+
+def on_chunk(text):
+    shown.append(text)
+    print(text, end="", flush=True)
+
+def on_stream_reset(partial):
+    shown.clear()
+    print("\n（訊號中斷，重新解析……）")
+```
+
+## 注意
+
+- `assistant_message` 只在有文字時觸發，純工具呼叫的那一輪不會。被截斷而接續的回答會觸發多次。
+- `iteration_end` 的 `traces` 是這次 loop 目前為止**所有**工具的紀錄，不只這一圈。
+- callback 是依序 `await` 的，慢的 callback 會拖慢整個 loop。要做重活就自己丟到背景 task。

@@ -1,0 +1,92 @@
+---
+title: Agent 與迴圈
+description: run() 呼叫一次，裡面到底轉了幾圈。
+---
+
+## 建立
+
+```python
+from shuvi.agent import Agent
+from shuvi.types import AgentConfig
+
+agent = Agent(
+    AgentConfig(
+        provider=llm,             # hai 的文字模型（ProviderText），必填
+        system_prompt="...",      # 每次呼叫模型都會帶上，不會存進 messages
+        tools=[...],              # hai 的 Tool
+        loop=LoopConfig(...),     # 迴圈控制，見「迴圈控制」
+        callbacks=AgentCallbacks(...),
+        session_id="room-1",      # 只會寫進 trace，方便你對照紀錄
+        context_manager=None,     # 給了就由它保存對話，見「Context 管理」
+    )
+)
+```
+
+## run()
+
+```python
+result = await agent.run(messages)
+```
+
+傳進去的 `messages` 是到目前為止的完整對話，回傳的 `result.messages` 是「傳進去的 + 這次新增的」。下一輪對話要自己把 `result.messages` 接著用：
+
+```python
+history = []
+history.append(UserMessage(content=[{"type": "text", "text": "早安"}]))
+result = await agent.run(history)
+history = result.messages
+```
+
+不想自己管，就用 [ContextManager](/docs/context)，這時 `run()` 不用傳參數。沒有 ContextManager 又沒傳 `messages`，會拋出 `ValueError`。
+
+## 一圈做了什麼
+
+```text
+┌─► 把 queue_message() 排隊的訊息接上
+│   stop_active 或到達 max_inner_iterations？ ── 是 ─► 結束
+│   呼叫模型一次（串流中斷、空回應會自動重試）
+│   把回答加成 AssistantMessage
+│   被 token 上限截斷？ ── 是 ─► 請模型接著寫，回到開頭
+│   有工具呼叫？ ── 沒有 ─► 結束這輪 loop
+│   並行執行全部工具，結果加成 ToolMessage
+└── iteration_end callback
+```
+
+loop 結束後，如果有設定 `verify_completion`，就跑驗證。沒過會加一則帶有原因的 `UserMessage`，再跑一次整個 loop，見[完成度驗證](/docs/verification)。
+
+## 結果
+
+```python
+result.outcome      # AGENT_OUTCOME
+result.messages     # 完整對話
+result.trace        # ExecutionTrace：耗時、token、工具紀錄
+result.handoff      # 交棒目標的名字，沒有交棒是 None
+```
+
+| `outcome`        | 意思                                                   |
+| ---------------- | ------------------------------------------------------ |
+| `completed`      | 模型不再呼叫工具，且驗證通過（或沒設驗證）            |
+| `max_iterations` | 到達 `max_inner_iterations`，這時不跑驗證             |
+| `verify_failed`  | 驗證重試了 `max_outer_retries` 次還是沒過             |
+| `error`          | 執行中拋出例外，而且有設 `callbacks.error`            |
+
+## 錯誤
+
+loop 裡發生例外時：
+
+- 有設 `callbacks.error`：呼叫它，`run()` 正常回傳，`outcome` 是 `error`，`messages` 停在出錯那一圈開始前的狀態。
+- 沒設：例外直接往外拋。
+
+工具自己拋出的例外**不算**這種錯誤，會變成錯誤字串交回模型，見[工具](/docs/tools#工具出錯)。
+
+## 狀態
+
+`agent.state` 是一個 `LoopState`，在多次 `run()` 之間會保留：
+
+| 欄位         | 意思                                       |
+| ------------ | ------------------------------------------ |
+| `turn_count` | 總共呼叫了模型幾次（跨 run 累加）          |
+| `stop_active`| 設成 `True` 會在下一圈開始前停下           |
+| `transition` | 最後一次交棒的目標                         |
+
+要歸零用 `agent.reset_state()`。

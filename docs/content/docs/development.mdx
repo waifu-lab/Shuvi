@@ -1,0 +1,55 @@
+---
+title: 開發與文檔維護
+---
+
+## Python 開發
+
+用 Poetry 打包：
+
+```bash
+poetry sync
+poetry run pytest
+poetry run ruff check shuvi test
+```
+
+## 文檔
+
+文檔在 `docs/`，和 [hai](https://github.com/waifu-lab/hai) 用同一套架構：Fumadocs + TanStack Start + Vite。內容放在 `docs/content/docs/`。需要 Node.js 24 和 pnpm：
+
+```bash
+cd docs
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+打開 `http://localhost:3000/docs`。
+
+| 指令               | 用途                         |
+| ------------------ | ---------------------------- |
+| `pnpm dev`         | 開發伺服器                   |
+| `pnpm types:check` | TypeScript 型別檢查          |
+| `pnpm build`       | 正式建置                     |
+| `pnpm lint`        | Biome 檢查                   |
+| `pnpm format`      | Biome 格式化（會直接改檔案） |
+
+## 新增頁面
+
+在 `content/docs/` 新增 `.mdx`，寫好 frontmatter：
+
+```mdx
+---
+title: 新功能
+description: ...
+---
+
+## 基本用法
+```
+
+再把檔名（不含副檔名）加進同一層的 `meta.json`。
+
+## 文檔風格
+
+- 內容用繁體中文，程式碼和識別字維持英文。
+- 配色在 `src/styles/app.css`：淡櫻粉為主色，`--color-circuit` 是機凱種回路的青色。
+- 首頁的核心動畫在 `src/components/schwi-core.tsx`，是純 SVG，沒有使用任何角色原圖。
+- 範例裡的角色台詞點到為止，程式碼本身要能直接執行。

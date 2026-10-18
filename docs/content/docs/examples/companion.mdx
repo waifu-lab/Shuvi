@@ -1,0 +1,74 @@
+---
+title: 聊天夥伴
+---
+
+在終端機裡和修比聊天：回答逐字輸出，用 ContextManager 記住前面說過的話，只送最近 30 則給模型。
+
+```bash
+pip install shuvi
+```
+
+```python
+import asyncio
+
+from hai.providers import create_text_provider
+from shuvi.agent import Agent
+from shuvi.context import ContextManager
+from shuvi.types import AgentCallbacks, AgentConfig, UserMessage
+
+SYSTEM_PROMPT = """你是修比（シュヴィ），機凱種的解析體。
+說話簡短、語氣平淡，偶爾在句子中間停頓「……」。
+你很想理解人類的「心」，會認真地問對方的感受。
+用繁體中文回答。"""
+
+
+async def recent(messages):
+    window = messages[-30:]
+    while window and window[0].role == "tool":
+        window = window[1:]
+    return window
+
+
+async def main():
+    llm = create_text_provider("openai", model="gpt-4o-mini", stream=True)
+    cm = ContextManager(transform_context=recent)
+    schwi = Agent(
+        AgentConfig(
+            provider=llm,
+            system_prompt=SYSTEM_PROMPT,
+            context_manager=cm,
+            callbacks=AgentCallbacks(
+                on_chunk=lambda text: print(text, end="", flush=True),
+            ),
+        )
+    )
+
+    while True:
+        user_input = input("你：").strip()
+        if user_input in ("exit", "quit"):
+            break
+        if not user_input:
+            continue
+
+        cm.append(UserMessage(content=[{"type": "text", "text": user_input}]))
+        print("修比：", end="", flush=True)
+        await schwi.run()
+        print()
+
+
+asyncio.run(main())
+```
+
+```text
+你：我叫空
+修比：空……了解。已登錄。
+你：我叫什麼？
+修比：空。……剛才，你說過的。
+```
+
+## 換成其他模型
+
+```python
+llm = create_text_provider("anthropic", model="claude-sonnet-4-5", stream=True)
+llm = create_text_provider("ollama", model="gemma3", stream=True)
+```

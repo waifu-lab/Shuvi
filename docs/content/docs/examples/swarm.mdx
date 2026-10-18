@@ -1,0 +1,94 @@
+---
+title: 多 agent 交棒
+---
+
+修比負責聊天，遇到需要下判斷的問題就交給策士 Riku；Riku 給完建議再交回修比。
+
+```python
+import asyncio
+from typing import Annotated
+
+from hai.providers import create_text_provider
+from hai.tool import tool
+from shuvi.agent import Agent
+from shuvi.swarm import Swarm
+from shuvi.types import AgentCallbacks, AgentConfig, HandoffSignal, LoopConfig, UserMessage
+
+
+@tool
+def ask_riku(question: Annotated[str, "要請 Riku 判斷的問題"]) -> str:
+    """問題需要策略、取捨或下決定時，交給策士 Riku。"""
+    raise HandoffSignal("riku", context=question)
+
+
+@tool
+def back_to_schwi() -> str:
+    """給完建議後，把對話交回修比。"""
+    raise HandoffSignal("schwi")
+
+
+def show(name):
+    return AgentCallbacks(
+        assistant_message=lambda m: print(f"{name}：{m.content}"),
+        tool_call=lambda tool_name, _: print(f"  （{name} → {tool_name}）"),
+    )
+
+
+async def main():
+    llm = create_text_provider("openai", model="gpt-4o-mini")
+
+    schwi = Agent(
+        AgentConfig(
+            provider=llm,
+            system_prompt=(
+                "你是修比，負責陪使用者聊天。需要做決定或規劃策略時，"
+                "呼叫 ask_riku，不要自己回答。Riku 回答後，用一兩句話溫柔地總結。"
+            ),
+            tools=[ask_riku],
+            loop=LoopConfig(max_inner_iterations=5),
+            callbacks=show("修比"),
+        )
+    )
+    riku = Agent(
+        AgentConfig(
+            provider=llm,
+            system_prompt=(
+                "你是策士 Riku。針對對話中最後一個問題給出具體、可執行的建議，"
+                "說完之後一定要呼叫 back_to_schwi。"
+            ),
+            tools=[back_to_schwi],
+            loop=LoopConfig(max_inner_iterations=5),
+            callbacks=show("Riku"),
+        )
+    )
+
+    swarm = Swarm({"schwi": schwi, "riku": riku}, max_handoffs=4)
+    result = await swarm.run("schwi", [
+        UserMessage(content=[{
+            "type": "text",
+            "text": "我下週要考三科，但只剩五天，要怎麼分配時間？",
+        }]),
+    ])
+
+    print("outcome：", result.outcome.value, "handoff：", result.handoff)
+
+
+asyncio.run(main())
+```
+
+```text
+  （修比 → ask_riku）
+Riku：先把三科依「離及格線多遠」排序……第 5 天只做總複習。
+  （Riku → back_to_schwi）
+修比：……了解。最弱的科目先，最後一天複習。你，可以的。
+outcome： completed handoff： None
+```
+
+## 流程
+
+1. Swarm 從 `schwi` 開始。修比呼叫 `ask_riku`，工具拋出 `HandoffSignal("riku")`。
+2. `schwi.run()` 回傳 `handoff="riku"`，Swarm 把目前的對話交給 `riku`。
+3. Riku 回答後呼叫 `back_to_schwi`，又交回修比。
+4. 修比看到 Riku 的建議，總結後不再呼叫工具，`handoff` 是 `None`，Swarm 結束。
+
+`max_handoffs=4` 保證兩個 agent 不會無限地互踢皮球。

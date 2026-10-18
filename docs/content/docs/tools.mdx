@@ -1,0 +1,93 @@
+---
+title: 工具
+description: 用 hai 的 @tool 定義，Agent 負責執行。
+---
+
+## 定義與使用
+
+工具就是 hai 的 `Tool`，用 `@tool` 把函式包起來，放進 `AgentConfig.tools`：
+
+```python
+from typing import Annotated
+
+from hai.tool import tool
+from shuvi.agent import Agent
+from shuvi.types import AgentConfig, LoopConfig
+
+
+@tool
+def scan(target: Annotated[str, "要解析的對象"]) -> str:
+    """解析一個對象，回傳它的組成。"""
+    return f"{target}：碳 18%、氧 65%、心 ???"
+
+
+agent = Agent(
+    AgentConfig(
+        provider=llm,
+        tools=[scan],
+        loop=LoopConfig(max_inner_iterations=10),
+    )
+)
+```
+
+docstring 變成工具說明，`Annotated` 的字串變成參數說明。也可以自己寫 JSON Schema：
+
+```python
+@tool(
+    description="Add two numbers together",
+    parameters={
+        "type": "object",
+        "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+        "required": ["a", "b"],
+    },
+)
+def add(a: float, b: float) -> float:
+    return a + b
+```
+
+更多寫法見 hai 的[工具呼叫](https://github.com/waifu-lab/hai/blob/main/docs/content/docs/tools.mdx)。
+
+<Callout>
+  沒設 `max_inner_iterations` 時圈數不限。工具會打外部服務的話，建議設個上限。
+</Callout>
+
+## 並行執行
+
+模型一次要求多個工具時，Agent 用 `asyncio.gather` 一起跑，結果照模型要求的順序接回對話。
+
+只有 `async def` 的工具會真的同時跑；一般的 `def` 會在執行時卡住 event loop。會等網路或讀檔的工具請寫成 async。
+
+## 工具出錯
+
+| 狀況                     | 交回模型的內容                              | callback        |
+| ------------------------ | ------------------------------------------- | --------------- |
+| 找不到這個工具           | `Tool 'xxx' not found`                      | 無              |
+| 參數不是合法 JSON        | `Error executing tool 'xxx': ...`           | `on_tool_error` |
+| 函式拋出例外             | `Error executing tool 'xxx': <例外訊息>`    | `on_tool_error` |
+
+這些都不會中斷 loop：模型看到錯誤訊息後，通常會換個參數再試。錯誤也會記在 `trace.tool_calls[i].error`。
+
+## 回傳圖片
+
+工具回傳 hai 的 `ImageResult`：
+
+```python
+from hai.tool import ImageResult, tool
+
+
+@tool
+def look() -> ImageResult:
+    """看一眼目前的畫面。"""
+    return ImageResult(data=png_bytes, media_type="image/png", description="目前畫面")
+```
+
+大部分模型 API 的工具結果只能是文字，所以 Agent 會：
+
+1. 先放一則內容是 `[image result]` 的 `ToolMessage`。
+2. 這一輪所有工具結果之後，再加一則帶 `image_url`（base64 data URL）的 `UserMessage`。
+
+`tool_result` callback 和 trace 收到的是 `description`，沒有的話是 `[image N bytes]`。完整範例見[看圖的工具](/docs/examples/image-tool)。
+
+## 交棒
+
+工具裡拋出 `HandoffSignal` 可以把對話交給另一個 agent，見 [Swarm 與交棒](/docs/swarm)。

@@ -1,0 +1,62 @@
+---
+title: 執行中控制
+description: loop 還在跑的時候插話、換工具、喊停。
+---
+
+## 插話：queue_message
+
+```python
+agent.queue_message(UserMessage(content=[{"type": "text", "text": "等等，改查東京"}]))
+```
+
+排進佇列的訊息會在**下一次呼叫模型之前**接到對話尾端。適合在 agent 還在跑工具時，讓使用者從另一個 task 補充資訊：
+
+```python
+async def chat():
+    task = asyncio.create_task(agent.run(history))
+    extra = await asyncio.to_thread(input, "要補充的話：")
+    agent.queue_message(UserMessage(content=[{"type": "text", "text": extra}]))
+    result = await task
+```
+
+loop 已經結束才排進去的訊息，會留到下一次 `run()` 才送出。
+
+## 換工具
+
+```python
+agent.add_tool(scan)
+agent.remove_tool("scan")
+agent.set_tools([scan, look])
+```
+
+下一次呼叫模型時生效，所以也可以在工具裡面解鎖新的工具：
+
+```python
+@tool
+def unlock() -> str:
+    """解除限制，取得進階解析能力。"""
+    agent.add_tool(deep_scan)
+    return "了解：已解鎖 deep_scan"
+```
+
+## 喊停：stop_active
+
+```python
+agent.state.stop_active = True
+```
+
+loop 會在下一圈開始前停下，不再呼叫模型。可以在 callback 裡或另一個 task 裡設：
+
+```python
+def guard(name, arguments):
+    if name == "self_destruct":
+        agent.state.stop_active = True
+
+agent = Agent(AgentConfig(provider=llm, callbacks=AgentCallbacks(tool_call=guard)))
+```
+
+<Callout type="warn">
+  `stop_active` 不會自己恢復。之後的 `run()` 會立刻結束，直到你呼叫 `agent.reset_state()` 或把它設回 `False`。
+</Callout>
+
+停下時 `outcome` 是 `completed`（有設驗證的話，會照常驗證）。正在執行中的工具會跑完，不會被中斷。

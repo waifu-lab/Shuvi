@@ -1,0 +1,80 @@
+---
+title: 會自我檢查的報告
+---
+
+請模型輸出 JSON 格式的分析報告。格式不對、欄位缺少，就把錯誤原因丟回去讓它重寫。
+
+```python
+import asyncio
+import json
+
+from hai.providers import create_text_provider
+from shuvi.agent import Agent
+from shuvi.types import AgentConfig, LoopConfig, UserMessage, VerificationRecord
+
+REQUIRED = {"summary", "emotion", "confidence"}
+
+
+def valid_json(messages) -> VerificationRecord:
+    text = (messages[-1].content or "").strip().removeprefix("```json").removesuffix("```")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        return VerificationRecord(passed=False, reason=f"不是合法的 JSON：{e}")
+    if not isinstance(data, dict):
+        return VerificationRecord(passed=False, reason="最外層必須是 JSON 物件")
+    missing = REQUIRED - data.keys()
+    if missing:
+        return VerificationRecord(passed=False, reason=f"缺少欄位：{', '.join(sorted(missing))}")
+    return VerificationRecord(passed=True)
+
+
+def confidence_in_range(messages) -> VerificationRecord:
+    text = (messages[-1].content or "").strip().removeprefix("```json").removesuffix("```")
+    confidence = json.loads(text)["confidence"]
+    if isinstance(confidence, (int, float)) and 0 <= confidence <= 1:
+        return VerificationRecord(passed=True)
+    return VerificationRecord(passed=False, reason="confidence 必須是 0 到 1 之間的數字")
+
+
+async def main():
+    llm = create_text_provider("openai", model="gpt-4o-mini")
+    agent = Agent(
+        AgentConfig(
+            provider=llm,
+            system_prompt=(
+                "你是情緒解析器。只輸出 JSON，欄位：summary（字串）、"
+                "emotion（字串）、confidence（0~1 的數字）。"
+            ),
+            loop=LoopConfig(
+                # 依序檢查，前一個沒過就不會跑下一個
+                verify_completion=[valid_json, confidence_in_range],
+                max_outer_retries=2,
+                verify_retry_prompt="輸出不符合要求：{reason}。請只輸出修正後的 JSON。",
+            ),
+        )
+    )
+
+    result = await agent.run([
+        UserMessage(content=[{
+            "type": "text",
+            "text": "「……我不懂。可是，胸口這裡，好溫暖。」",
+        }]),
+    ])
+
+    print(result.outcome.value)
+    for i, v in enumerate(result.trace.verifications, 1):
+        print(f"第 {i} 次驗證：{'通過' if v.passed else v.reason}")
+    print(result.messages[-1].content)
+
+
+asyncio.run(main())
+```
+
+```text
+completed
+第 1 次驗證：通過
+{"summary": "說話者無法理解自己的感受，但感到溫暖", "emotion": "困惑而溫暖", "confidence": 0.82}
+```
+
+`outcome` 是 `verify_failed` 時，最後一則訊息就是沒通過的那次回答，可以決定要不要用。

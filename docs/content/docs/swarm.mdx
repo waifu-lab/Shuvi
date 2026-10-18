@@ -1,0 +1,66 @@
+---
+title: Swarm 與交棒
+description: 一個 agent 處理不來，就交給下一個。
+---
+
+## HandoffSignal
+
+在工具裡拋出 `HandoffSignal("目標名字")`，Agent 就會結束這次 `run()`，並在結果裡標記要交給誰：
+
+```python
+from hai.tool import tool
+from shuvi.types import HandoffSignal
+
+
+@tool
+def call_riku(reason: str) -> str:
+    """遇到需要策略判斷的問題時，交給策士 Riku。"""
+    raise HandoffSignal("riku", context=reason)
+```
+
+```python
+result = await schwi.run(messages)
+result.handoff        # "riku"
+result.outcome        # completed
+schwi.state.transition  # "riku"
+```
+
+細節：
+
+- 這個工具呼叫仍會得到一則 `ToolMessage`，內容是 `Handing off to agent 'riku'`，對話格式保持完整。
+- 同一輪的其他工具照常執行完。多個工具都要交棒時，以第一個為準。
+- `HandoffSignal` 繼承 `BaseException` 而不是 `Exception`，工具裡的 `except Exception` 不會不小心吃掉它。
+- `context` 參數 Shuvi 本身不會用到，要傳給下一個 agent 的資訊請寫在工具回傳或對話裡。
+
+## Swarm
+
+`Swarm` 幫你處理「看到 `handoff` 就換人」這件事：
+
+```python
+from shuvi.swarm import Swarm
+
+swarm = Swarm({"schwi": schwi, "riku": riku}, max_handoffs=10)
+result = await swarm.run("schwi", messages)
+```
+
+1. 用 `entry` 指定的 agent 跑 `run(messages)`。
+2. 結果有 `handoff` 就換成那個 agent，並把 `result.messages` 傳下去。
+3. 沒有交棒、或已經交棒 `max_handoffs` 次就停，回傳最後一個 agent 的結果。
+
+| 方法                        | 用途                               |
+| --------------------------- | ---------------------------------- |
+| `Swarm(agents, max_handoffs=10)` | `agents` 是 `{名字: Agent}`   |
+| `add_agent(name, agent)`    | 之後再加 agent                     |
+| `await run(entry, messages)` | 從 `entry` 開始跑                 |
+
+找不到交棒目標時拋出 `KeyError`。
+
+<Callout type="warn">
+  有設 ContextManager 的 agent，Swarm 會用 `agent.run()` 呼叫它（不傳訊息），所以**前一個 agent 的對話不會自動傳過去**。要接續就自己在交棒前把訊息加進那個 agent 的 ContextManager。
+</Callout>
+
+## 互相交棒
+
+兩個 agent 都可以把對方加成工具，來回交棒；`max_handoffs` 防止無限循環。到達上限時，回傳的結果 `handoff` 仍然有值，可以用來判斷是不是被強制停下。
+
+完整範例見[多 agent 交棒](/docs/examples/swarm)。

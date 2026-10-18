@@ -1,0 +1,39 @@
+---
+title: 專案概覽
+description: 修比（シュヴィ）—— 一個想理解「心」的 agent loop。
+---
+
+<Callout title="Üc207Pr4f57t9">
+  機凱種（Ex-Machina）的解析體，暱稱修比（Schwi，シュヴィ）。
+  她最想弄懂的東西，是人類的「心」。
+</Callout>
+
+Shuvi 是一個用 Python 寫的輕量非同步 agent loop，用來做 AI 夥伴：會聊天、會用工具、會檢查自己的答案，必要時把對話交給另一個 agent。
+
+模型呼叫和工具定義都交給 [Hydrogen AI（hai）](https://github.com/waifu-lab/hai)，Shuvi 只負責中間那個「想 → 做 → 再想」的迴圈：
+
+1. 把訊息送給模型。
+2. 模型要求呼叫工具，就並行執行，把結果接回對話。
+3. 回到 1，直到模型不再呼叫工具。
+4. 有設定驗證函式的話，檢查最後的答案；沒過就把理由塞回去，從 1 重來。
+
+```python
+result = await agent.run(messages)
+print(result.outcome)              # completed / max_iterations / verify_failed / error
+print(result.messages[-1].content)
+```
+
+## 模組
+
+| 模組            | 內容                                                               |
+| --------------- | ------------------------------------------------------------------ |
+| `shuvi.agent`   | `Agent`，跑 loop 的本體                                           |
+| `shuvi.types`   | 訊息、設定（`AgentConfig`、`LoopConfig`、`AgentCallbacks`）、結果  |
+| `shuvi.context` | `ContextManager`，幫你保存對話紀錄                                |
+| `shuvi.swarm`   | `Swarm`，多個 agent 之間交棒                                      |
+
+## 接下來
+
+- [快速開始](/docs/quick-start)：五分鐘跑起第一個 agent
+- [Agent 與迴圈](/docs/agent)：loop 每一步到底做了什麼
+- [範例](/docs/examples/companion)：聊天夥伴、工具助理、多 agent 交棒

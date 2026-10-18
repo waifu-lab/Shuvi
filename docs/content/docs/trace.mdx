@@ -1,0 +1,52 @@
+---
+title: 執行紀錄
+description: ExecutionTrace：這次 run() 花了多久、用了多少 token、呼叫了哪些工具。
+---
+
+```python
+result = await agent.run(messages)
+trace = result.trace
+
+print(trace.outcome, f"{trace.duration_ms:.0f} ms")
+print("tokens:", trace.token_usage.total)
+for call in trace.tool_calls:
+    print(call.name, call.input, "→", call.output, f"{call.duration_ms:.1f} ms")
+```
+
+## ExecutionTrace
+
+| 欄位               | 型別                        | 內容                                         |
+| ------------------ | --------------------------- | -------------------------------------------- |
+| `start_time`       | `str`                       | ISO 8601                                     |
+| `end_time`         | `str`                       | ISO 8601                                     |
+| `duration_ms`      | `float`                     | 整個 `run()` 花的時間                        |
+| `token_usage`      | `TokenUsage`                | `input`、`output`、`total`                   |
+| `inner_iterations` | `int`                       | 總共呼叫了模型幾次（含驗證後的重跑）         |
+| `outer_retries`    | `int`                       | 驗證失敗後重跑了幾次                         |
+| `outcome`          | `AGENT_OUTCOME`             | 和 `result.outcome` 相同                     |
+| `tool_calls`       | `list[ToolCallTrace]`       | 每一次工具呼叫                               |
+| `verifications`    | `list[VerificationRecord]`  | 每一次驗證的結果                             |
+| `session_id`       | `str \| None`               | `AgentConfig.session_id`                     |
+
+## ToolCallTrace
+
+| 欄位          | 內容                                      |
+| ------------- | ----------------------------------------- |
+| `name`        | 工具名稱                                  |
+| `input`       | 模型給的參數（JSON 字串）                 |
+| `output`      | 交回模型的結果；圖片是 description        |
+| `duration_ms` | 執行時間                                  |
+| `error`       | 出錯時的錯誤訊息，正常是 `None`           |
+
+## 存下來
+
+全部都是 pydantic model：
+
+```python
+with open("trace.jsonl", "a", encoding="utf-8") as f:
+    f.write(result.trace.model_dump_json() + "\n")
+```
+
+<Callout>
+  token 用量來自 provider 回報的數字。串流模式下有些服務不回報用量，這時會是 0。
+</Callout>

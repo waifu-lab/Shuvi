@@ -1,0 +1,68 @@
+---
+title: 快速開始
+---
+
+## 安裝
+
+```bash
+pip install shuvi
+```
+
+需要 Python 3.10 以上，會一起裝好 `hydrogen-ai` 和 `pydantic`。
+
+## 第一個 agent
+
+```python
+import asyncio
+
+from hai.providers import create_text_provider
+from shuvi.agent import Agent
+from shuvi.types import AgentConfig, UserMessage
+
+
+async def main():
+    # 沒傳 api_key 時讀 OPENAI_API_KEY
+    llm = create_text_provider("openai", model="gpt-4o-mini")
+    schwi = Agent(
+        AgentConfig(
+            provider=llm,
+            system_prompt="你是修比，說話簡短，句尾偶爾會停頓一下。",
+        )
+    )
+
+    result = await schwi.run([
+        UserMessage(content=[{"type": "text", "text": "你好，你叫什麼名字？"}]),
+    ])
+    print(result.messages[-1].content)
+
+
+asyncio.run(main())
+```
+
+`provider` 可以是任何 hai 的文字模型。想用 Claude、Gemini 或本機的 Ollama，把 `create_text_provider` 的第一個參數換掉就好，見 hai 的[模型供應商](https://github.com/waifu-lab/hai/tree/main/docs/content/docs/providers)。
+
+<Callout type="warn">
+  `UserMessage.content` 是一個 list，裡面每個元素是 OpenAI 格式的 content part（`{"type": "text", ...}` 或 `{"type": "image_url", ...}`），不是純字串。
+</Callout>
+
+## 逐字輸出
+
+provider 開 `stream=True`，再給 `on_chunk`：
+
+```python
+from shuvi.types import AgentCallbacks
+
+llm = create_text_provider("openai", model="gpt-4o-mini", stream=True)
+schwi = Agent(
+    AgentConfig(
+        provider=llm,
+        callbacks=AgentCallbacks(on_chunk=lambda text: print(text, end="", flush=True)),
+    )
+)
+```
+
+## 下一步
+
+- [工具](/docs/tools)：讓 agent 能動手做事
+- [迴圈控制](/docs/loop-config)：限制圈數、處理被截斷的回答
+- [範例](/docs/examples/companion)：完整可執行的程式

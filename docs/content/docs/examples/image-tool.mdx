@@ -1,0 +1,69 @@
+---
+title: 看圖的工具
+---
+
+工具回傳圖片，模型讀圖後回答。需要支援圖片輸入的模型。
+
+```bash
+pip install shuvi httpx
+```
+
+```python
+import asyncio
+from typing import Annotated
+
+import httpx
+from hai.providers import create_text_provider
+from hai.tool import ImageResult, tool
+from shuvi.agent import Agent
+from shuvi.types import AgentConfig, LoopConfig, UserMessage
+
+
+@tool
+async def fetch_image(url: Annotated[str, "圖片網址"]) -> ImageResult:
+    """下載一張圖片，讓你看見它。"""
+    async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+    media_type = response.headers.get("content-type", "image/png").split(";")[0]
+    return ImageResult(data=response.content, media_type=media_type, description=url)
+
+
+async def main():
+    llm = create_text_provider("openai", model="gpt-4o-mini")
+    agent = Agent(
+        AgentConfig(
+            provider=llm,
+            system_prompt="你是修比。看到圖片時，先描述你解析到的東西，再說你的感想。",
+            tools=[fetch_image],
+            loop=LoopConfig(max_inner_iterations=4),
+        )
+    )
+
+    result = await agent.run([
+        UserMessage(content=[{
+            "type": "text",
+            "text": "幫我看看這張圖：https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
+        }]),
+    ])
+    print(result.messages[-1].content)
+
+
+asyncio.run(main())
+```
+
+## 對話裡長什麼樣
+
+```text
+user       幫我看看這張圖：...
+assistant  tool_calls=[fetch_image(url=...)]
+tool       [image result]
+user       [image_url: data:image/png;base64,...]
+assistant  解析……這是兩顆骰子……
+```
+
+`ToolMessage` 只放佔位文字，圖片本體放在緊接著的 `UserMessage`，見[工具：回傳圖片](/docs/tools#回傳圖片)。
+
+<Callout type="warn">
+  base64 圖片會一直留在對話裡，每次呼叫模型都會重送。長對話記得用 ContextManager 的 `transform_context` 把舊圖片拿掉。
+</Callout>

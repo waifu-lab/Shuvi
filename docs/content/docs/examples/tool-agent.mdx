@@ -1,0 +1,83 @@
+---
+title: 會用工具的助理
+---
+
+讓模型自己決定要查天氣、換算匯率還是看時間，並把每次工具呼叫印出來。
+
+```python
+import asyncio
+from datetime import datetime
+from typing import Annotated, Literal
+
+from hai.providers import create_text_provider
+from hai.tool import tool
+from shuvi.agent import Agent
+from shuvi.types import AgentCallbacks, AgentConfig, LoopConfig, UserMessage
+
+Currency = Literal["TWD", "USD", "JPY", "EUR"]
+RATES = {"TWD": 1.0, "USD": 32.0, "JPY": 0.21, "EUR": 35.0}
+
+
+@tool
+def get_weather(city: Annotated[str, "城市名稱，例如 台北"]) -> str:
+    """查詢城市目前的天氣。"""
+    weather = {"台北": "晴，28°C", "東京": "多雲，22°C", "倫敦": "小雨，14°C"}
+    return weather.get(city, f"查不到 {city} 的天氣")
+
+
+@tool
+def convert_currency(
+    amount: Annotated[float, "金額"],
+    from_currency: Annotated[Currency, "原本的幣別"],
+    to_currency: Annotated[Currency, "要換成的幣別"],
+) -> str:
+    """換算貨幣。"""
+    result = amount * RATES[from_currency] / RATES[to_currency]
+    return f"{amount} {from_currency} = {result:.2f} {to_currency}"
+
+
+@tool
+async def current_time() -> str:
+    """取得現在時間。"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+async def main():
+    llm = create_text_provider("openai", model="gpt-4o-mini")
+    agent = Agent(
+        AgentConfig(
+            provider=llm,
+            system_prompt="你是助理，需要資料時一定要用工具查，用繁體中文回答。",
+            tools=[get_weather, convert_currency, current_time],
+            loop=LoopConfig(max_inner_iterations=8),
+            callbacks=AgentCallbacks(
+                tool_call=lambda name, args: print(f"  → {name} {args}"),
+                tool_result=lambda name, result: print(f"  ← {result}"),
+            ),
+        )
+    )
+
+    result = await agent.run([
+        UserMessage(content=[{
+            "type": "text",
+            "text": "東京天氣如何？另外 100 美金是多少日圓？",
+        }]),
+    ])
+    print(result.messages[-1].content)
+    print(f"[{result.outcome.value}] 工具 {len(result.trace.tool_calls)} 次，"
+          f"token {result.trace.token_usage.total}")
+
+
+asyncio.run(main())
+```
+
+```text
+  → get_weather {"city": "東京"}
+  → convert_currency {"amount": 100, "from_currency": "USD", "to_currency": "JPY"}
+  ← 多雲，22°C
+  ← 100.0 USD = 15238.10 JPY
+東京目前多雲，22°C。100 美金約是 15,238 日圓。
+[completed] 工具 2 次，token 412
+```
+
+兩個工具在同一輪被要求，所以會一起執行。
