@@ -1,0 +1,57 @@
+---
+title: Context 管理
+---
+
+## 使用
+
+```python
+from shuvi.context import ContextManager
+
+cm = ContextManager()
+agent = Agent(AgentConfig(provider=llm, context_manager=cm))
+
+cm.append(UserMessage(content=[{"type": "text", "text": "我叫空"}]))
+await agent.run()
+
+cm.append(UserMessage(content=[{"type": "text", "text": "我叫什麼？"}]))
+result = await agent.run()
+print(result.messages[-1].content)  # 你叫空
+```
+
+## 常用方法
+
+```python
+cm.history             # 完整對話
+cm.append(message)
+cm.extend(messages)
+cm.clear()
+```
+
+## 只送最近的訊息
+
+```python
+async def last_20(messages):
+    recent = messages[-20:]
+    while recent and recent[0].role == "tool":  # 別從工具結果開頭
+        recent = recent[1:]
+    return recent
+
+cm = ContextManager(transform_context=last_20)
+```
+
+## 自訂轉換
+
+把[自訂訊息](/docs/messages#自訂訊息)變成模型看得到的文字：
+
+```python
+async def convert(messages):
+    out = []
+    for m in messages:
+        if m.role == "memo":
+            out.append(UserMessage(content=[{"type": "text", "text": f"（備忘：{m.content}）"}]))
+        elif m.role in ("user", "assistant", "tool"):
+            out.append(m)
+    return out
+
+cm = ContextManager(convert_to_llm=convert)
+```

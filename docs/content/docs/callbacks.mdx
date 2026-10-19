@@ -1,0 +1,39 @@
+---
+title: Callbacks
+---
+
+## 使用
+
+```python
+from shuvi.types import AgentCallbacks
+
+callbacks = AgentCallbacks(
+    on_chunk=lambda text: print(text, end="", flush=True),
+    tool_call=lambda name, args: print(f"\n[呼叫] {name}({args})"),
+    tool_result=lambda name, result: print(f"[結果] {name} → {result}"),
+)
+agent = Agent(AgentConfig(provider=llm, callbacks=callbacks))
+```
+
+一般函式或 `async def` 都可以。
+
+## 全部 callback
+
+| Callback            | 參數                           | 時機                       |
+| ------------------- | ------------------------------ | -------------------------- |
+| `on_chunk`          | `text`                         | 串流收到文字               |
+| `on_stream_reset`   | `partial`                      | 串流斷線，準備重來         |
+| `assistant_message` | `message`                      | 模型回了文字               |
+| `tool_call`         | `name, arguments`              | 開始執行工具               |
+| `tool_result`       | `name, result`                 | 工具執行完                 |
+| `on_tool_error`     | `name, error`                  | 工具拋出例外               |
+| `iteration_end`     | `iteration, traces`            | 一圈的工具都跑完           |
+| `state_update`      | `state`                        | 狀態改變                   |
+| `error`             | `error`                        | 執行出錯                   |
+
+## 串流斷線
+
+```python
+def on_stream_reset(partial):
+    print("\n（訊號中斷，重新解析……）")
+```

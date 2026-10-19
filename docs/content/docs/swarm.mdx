@@ -1,0 +1,27 @@
+---
+title: Swarm 與交棒
+---
+
+## 交棒工具
+
+```python
+from hai.tool import tool
+from shuvi.types import HandoffSignal
+
+
+@tool
+def call_riku(reason: str) -> str:
+    """遇到需要策略判斷的問題時，交給策士 Riku。"""
+    raise HandoffSignal("riku")
+```
+
+## Swarm
+
+```python
+from shuvi.swarm import Swarm
+
+swarm = Swarm({"schwi": schwi, "riku": riku}, max_handoffs=10)
+result = await swarm.run("schwi", messages)
+```
+
+用了 ContextManager 的 agent，交棒時對話不會自動帶過去。

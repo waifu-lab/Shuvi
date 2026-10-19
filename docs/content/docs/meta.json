@@ -1,0 +1,22 @@
+{
+  "title": "Shuvi",
+  "pages": [
+    "index",
+    "---開始使用---",
+    "quick-start",
+    "---核心概念---",
+    "agent",
+    "messages",
+    "---功能---",
+    "tools",
+    "loop-config",
+    "verification",
+    "callbacks",
+    "context",
+    "runtime",
+    "swarm",
+    "trace",
+    "---範例---",
+    "examples"
+  ]
+}

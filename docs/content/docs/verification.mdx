@@ -1,0 +1,47 @@
+---
+title: 完成度驗證
+---
+
+## 驗證函式
+
+```python
+from shuvi.types import LoopConfig, VerificationRecord
+
+
+def ends_with_conclusion(messages) -> VerificationRecord:
+    text = messages[-1].content or ""
+    if "結論：" in text:
+        return VerificationRecord(passed=True)
+    return VerificationRecord(passed=False, reason="最後要有一行以「結論：」開頭")
+
+
+loop = LoopConfig(
+    verify_completion=[ends_with_conclusion],
+    max_outer_retries=2,
+    verify_retry_prompt="還不行。原因：{reason}。請修正後重新回答。",
+)
+```
+
+沒通過時，`reason` 會傳回給模型請它重寫。
+
+## 用模型來驗證
+
+```python
+import json
+import os
+
+judge = create_text_provider(
+    "openai",
+    model="gpt-4o-mini",
+    api_key=os.environ["OPENAI_API_KEY"],
+)
+
+
+async def judged_by_llm(messages) -> VerificationRecord:
+    answer = messages[-1].content or ""
+    turn = await judge.call_once(
+        [{"role": "user", "content": f"這個回答有沒有直接回應問題？只回 JSON："
+          f'{{"passed": true/false, "reason": "..."}}\n\n{answer}'}],
+    )
+    return VerificationRecord(**json.loads(turn.content))
+```

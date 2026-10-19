@@ -1,0 +1,22 @@
+---
+title: 執行紀錄
+---
+
+## 讀取
+
+```python
+result = await agent.run(messages)
+trace = result.trace
+
+print(trace.outcome, f"{trace.duration_ms:.0f} ms")
+print("tokens:", trace.token_usage.total)
+for call in trace.tool_calls:
+    print(call.name, call.input, "→", call.output)
+```
+
+## 存成檔案
+
+```python
+with open("trace.jsonl", "a", encoding="utf-8") as f:
+    f.write(result.trace.model_dump_json() + "\n")
+```

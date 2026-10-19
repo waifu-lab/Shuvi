@@ -1,0 +1,49 @@
+---
+title: 工具
+---
+
+## 定義工具
+
+```python
+from typing import Annotated
+
+from hai.tool import tool
+
+
+@tool
+def scan(target: Annotated[str, "要解析的對象"]) -> str:
+    return f"{target}：碳 18%、氧 65%、心 ???"
+
+
+agent = Agent(
+    AgentConfig(
+        provider=llm,
+        tools=[scan],
+        loop=LoopConfig(max_inner_iterations=10),
+    )
+)
+```
+
+## 非同步工具
+
+會連網路或讀檔的工具寫成 `async def`，才能和其他工具同時跑：
+
+```python
+@tool
+async def fetch(url: str) -> str:
+    """下載網頁內容。"""
+    async with httpx.AsyncClient() as client:
+        return (await client.get(url)).text
+```
+
+## 回傳圖片
+
+```python
+from hai.tool import ImageResult
+
+
+@tool
+def look() -> ImageResult:
+    """看一眼目前的畫面。"""
+    return ImageResult(data=png_bytes, media_type="image/png", description="目前畫面")
+```

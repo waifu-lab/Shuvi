@@ -1,0 +1,10 @@
+{
+  "title": "範例",
+  "defaultOpen": true,
+  "pages": [
+    "companion",
+    "tool-agent",
+    "image-tool",
+    "swarm"
+  ]
+}

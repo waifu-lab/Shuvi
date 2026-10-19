@@ -1,0 +1,60 @@
+---
+title: 輸入圖片
+---
+
+由工具回傳圖片
+
+```bash
+pip install shuvi python-dotenv httpx
+```
+
+```python
+import asyncio
+import os
+from typing import Annotated
+
+import httpx
+from dotenv import load_dotenv
+from hai.providers import create_text_provider
+from hai.tool import ImageResult, tool
+from shuvi.agent import Agent
+from shuvi.types import AgentConfig, LoopConfig, UserMessage
+
+load_dotenv()
+
+
+@tool
+async def fetch_image(url: Annotated[str, "圖片網址"]) -> ImageResult:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+    media_type = response.headers.get("content-type", "image/png").split(";")[0]
+    return ImageResult(data=response.content, media_type=media_type, description=url)
+
+
+async def main():
+    llm = create_text_provider(
+        "openai",
+        model="gpt-4o-mini",
+        api_key=os.environ["OPENAI_API_KEY"],
+    )
+    agent = Agent(
+        AgentConfig(
+            provider=llm,
+            system_prompt="你是修比。看到圖片時，先描述你解析到的東西，再說你的感想。",
+            tools=[fetch_image],
+            loop=LoopConfig(max_inner_iterations=4),
+        )
+    )
+
+    result = await agent.run([
+        UserMessage(content=[{
+            "type": "text",
+            "text": "幫我看看這張圖：https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
+        }]),
+    ])
+    print(result.messages[-1].content)
+
+
+asyncio.run(main())
+```

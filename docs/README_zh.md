@@ -31,21 +31,35 @@ uv sync
 
 **Example**
 
+範例會從目前目錄的 `.env` 讀取 API key：
+
+```bash
+pip install shuvi python-dotenv
+```
+
+```
+OPENAI_API_KEY=sk-...
+```
+
 基本用法：
 
 ```python
 import asyncio
 import os
 
-from hai.providers.openai import OpenAI
+from dotenv import load_dotenv
+from hai.providers import create_text_provider
 from shuvi.agent import Agent
 from shuvi.types import AgentConfig, UserMessage
 
+load_dotenv()
+
 
 async def main() -> None:
-    provider = OpenAI(
-        api_key=os.environ["OPENAI_API_KEY"],
+    provider = create_text_provider(
+        "openai",
         model="gpt-4o-mini",
+        api_key=os.environ["OPENAI_API_KEY"],
         stream=False,
     )
     agent = Agent(
@@ -79,10 +93,13 @@ asyncio.run(main())
 import asyncio
 import os
 
-from hai.providers.openai import OpenAI
+from dotenv import load_dotenv
+from hai.providers import create_text_provider
 from hai.tool import tool
 from shuvi.agent import Agent
 from shuvi.types import AgentConfig, LoopConfig, UserMessage
+
+load_dotenv()
 
 
 @tool(
@@ -101,9 +118,10 @@ def add(a: float, b: float) -> float:
 
 
 async def main() -> None:
-    provider = OpenAI(
-        api_key=os.environ["OPENAI_API_KEY"],
+    provider = create_text_provider(
+        "openai",
         model="gpt-4o-mini",
+        api_key=os.environ["OPENAI_API_KEY"],
         stream=False,
     )
     agent = Agent(
@@ -139,9 +157,12 @@ asyncio.run(main())
 import asyncio
 import os
 
-from hai.providers.openai import OpenAI
+from dotenv import load_dotenv
+from hai.providers import create_text_provider
 from shuvi.agent import Agent
 from shuvi.types import AgentCallbacks, AgentConfig, UserMessage
+
+load_dotenv()
 
 
 def print_chunk(chunk: str) -> None:
@@ -149,9 +170,10 @@ def print_chunk(chunk: str) -> None:
 
 
 async def main() -> None:
-    provider = OpenAI(
-        api_key=os.environ["OPENAI_API_KEY"],
+    provider = create_text_provider(
+        "openai",
         model="gpt-4o-mini",
+        api_key=os.environ["OPENAI_API_KEY"],
         stream=True,
     )
     agent = Agent(

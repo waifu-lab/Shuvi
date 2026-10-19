@@ -1,0 +1,27 @@
+---
+title: 執行中控制
+---
+
+## 插話
+
+```python
+task = asyncio.create_task(agent.run(history))
+agent.queue_message(UserMessage(content=[{"type": "text", "text": "等等，改查東京"}]))
+result = await task
+```
+
+## 換工具
+
+```python
+agent.add_tool(scan)
+agent.remove_tool("scan")
+agent.set_tools([scan, look])
+```
+
+## 喊停
+
+```python
+agent.state.stop_active = True
+```
+
+之後要再跑，先呼叫 `agent.reset_state()`。

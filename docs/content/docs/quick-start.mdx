@@ -1,0 +1,61 @@
+---
+title: 快速開始
+---
+
+## 安裝
+
+```bash
+pip install shuvi
+```
+
+## 第一個 agent
+
+```python
+import asyncio
+import os
+
+from hai.providers import create_text_provider
+from shuvi.agent import Agent
+from shuvi.types import AgentConfig, UserMessage
+
+
+async def main():
+    llm = create_text_provider(
+        "openai",
+        model="gpt-4o-mini",
+        api_key=os.environ["OPENAI_API_KEY"],
+    )
+    schwi = Agent(
+        AgentConfig(
+            provider=llm,
+            system_prompt="你是修比，說話簡短，句尾偶爾會停頓一下。",
+        )
+    )
+
+    result = await schwi.run([
+        UserMessage(content=[{"type": "text", "text": "你好，你叫什麼名字？"}]),
+    ])
+    print(result.messages[-1].content)
+
+
+asyncio.run(main())
+```
+
+## 逐字輸出
+
+```python
+from shuvi.types import AgentCallbacks
+
+llm = create_text_provider(
+    "openai",
+    model="gpt-4o-mini",
+    api_key=os.environ["OPENAI_API_KEY"],
+    stream=True,
+)
+schwi = Agent(
+    AgentConfig(
+        provider=llm,
+        callbacks=AgentCallbacks(on_chunk=lambda text: print(text, end="", flush=True)),
+    )
+)
+```

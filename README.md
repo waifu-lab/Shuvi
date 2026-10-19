@@ -31,21 +31,32 @@ uv sync
 
 **Example**
 
+The examples read the API key from a `.env` file in the working directory:
+
+```bash
+pip install shuvi
+```
+
+```
+OPENAI_API_KEY=sk-...
+```
+
 Basic usage:
 
 ```python
 import asyncio
 import os
 
-from hai.providers.openai import OpenAI
+
+from hai.providers import create_text_provider
 from shuvi.agent import Agent
 from shuvi.types import AgentConfig, UserMessage
 
-
 async def main() -> None:
-    provider = OpenAI(
-        api_key=os.environ["OPENAI_API_KEY"],
+    provider = create_text_provider(
+        "openai",
         model="gpt-4o-mini",
+        api_key=os.environ["OPENAI_API_KEY"],
         stream=False,
     )
     agent = Agent(
@@ -79,10 +90,13 @@ With tools:
 import asyncio
 import os
 
-from hai.providers.openai import OpenAI
+from dotenv import load_dotenv
+from hai.providers import create_text_provider
 from hai.tool import tool
 from shuvi.agent import Agent
 from shuvi.types import AgentConfig, LoopConfig, UserMessage
+
+load_dotenv()
 
 
 @tool(
@@ -101,9 +115,10 @@ def add(a: float, b: float) -> float:
 
 
 async def main() -> None:
-    provider = OpenAI(
-        api_key=os.environ["OPENAI_API_KEY"],
+    provider = create_text_provider(
+        "openai",
         model="gpt-4o-mini",
+        api_key=os.environ["OPENAI_API_KEY"],
         stream=False,
     )
     agent = Agent(
@@ -139,9 +154,12 @@ Streaming mode:
 import asyncio
 import os
 
-from hai.providers.openai import OpenAI
+from dotenv import load_dotenv
+from hai.providers import create_text_provider
 from shuvi.agent import Agent
 from shuvi.types import AgentCallbacks, AgentConfig, UserMessage
+
+load_dotenv()
 
 
 def print_chunk(chunk: str) -> None:
@@ -149,9 +167,10 @@ def print_chunk(chunk: str) -> None:
 
 
 async def main() -> None:
-    provider = OpenAI(
-        api_key=os.environ["OPENAI_API_KEY"],
+    provider = create_text_provider(
+        "openai",
         model="gpt-4o-mini",
+        api_key=os.environ["OPENAI_API_KEY"],
         stream=True,
     )
     agent = Agent(

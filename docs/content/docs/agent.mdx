@@ -1,0 +1,68 @@
+---
+title: Agent 與迴圈
+---
+
+## 建立
+
+```python
+from shuvi.agent import Agent
+from shuvi.types import AgentConfig
+
+agent = Agent(
+    AgentConfig(
+        provider=llm,                   # 必填
+        system_prompt="...",
+        tools=[...],                    # 見「工具」
+        loop=LoopConfig(...),           # 見「迴圈控制」
+        callbacks=AgentCallbacks(...),  # 見「Callbacks」
+        context_manager=None,           # 見「Context 管理」
+        session_id="room-1",            # 寫進 trace
+    )
+)
+```
+
+## 多輪對話
+
+`run()` 回傳的 `result.messages` 是完整對話，下一輪接著用：
+
+```python
+history = [UserMessage(content=[{"type": "text", "text": "早安"}])]
+result = await agent.run(history)
+history = result.messages
+```
+
+不想自己管，用 [ContextManager](/docs/context)。
+
+## 一圈做了什麼
+
+```text
+┌─► 呼叫模型
+│   模型要用工具？ ── 不用 ─► 結束（有設驗證就驗證）
+│   執行工具，結果接回對話
+└── 回到開頭
+```
+
+## 結果
+
+```python
+result.outcome   # completed / max_iterations / verify_failed / error
+result.messages  # 完整對話
+result.trace     # 耗時、token、工具紀錄，見「執行紀錄」
+result.handoff   # 交棒對象，沒有是 None
+```
+
+## 錯誤處理
+
+```python
+agent = Agent(AgentConfig(
+    provider=llm,
+    callbacks=AgentCallbacks(error=lambda e: print("出錯：", e)),
+))
+result = await agent.run(messages)  # 設了 error 就不會拋例外，outcome 是 error
+```
+
+## 重設狀態
+
+```python
+agent.reset_state()
+```

@@ -1,0 +1,44 @@
+---
+title: 訊息
+---
+
+## UserMessage
+
+```python
+from shuvi.types import UserMessage
+
+UserMessage(content=[
+    {"type": "text", "text": "這是什麼？"},
+    {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+])
+```
+
+## AssistantMessage
+
+```python
+AssistantMessage(content="了解。")
+```
+
+## ToolMessage
+
+```python
+ToolMessage(tool_call_id="call_abc", content="解析完成")
+```
+
+## 自訂訊息
+
+存進 ContextManager，但不送給模型：
+
+```python
+from pydantic import BaseModel
+
+
+class Memo(BaseModel):
+    role: str = "memo"
+    content: str
+
+
+cm.append(Memo(content="使用者今天心情不好"))
+```
+
+要讓模型看到，見[自訂轉換](/docs/context#自訂轉換)。
